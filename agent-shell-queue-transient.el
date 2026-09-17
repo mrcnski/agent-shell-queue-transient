@@ -1,0 +1,268 @@
+;;; agent-shell-queue-transient.el --- Manage pending agent prompts -*- lexical-binding: t; -*-
+
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "29.1") (agent-shell "0.76.1") (transient "0.7"))
+;; Keywords: tools, convenience
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;;; Commentary:
+;; Enable `agent-shell-queue-transient-mode', then invoke
+;; `agent-shell-queue-transient'.  Queue controls use agent-shell internals.
+
+;;; Code:
+
+(require 'agent-shell)
+(require 'agent-shell-prompt-queue)
+(require 'transient)
+(require 'seq)
+(require 'map)
+
+(defvar-local agent-shell-queue-transient--paused nil
+  "Non-nil when this shell's queue is explicitly paused.")
+(defvar-local agent-shell-queue-transient--holds 0
+  "Number of active queue editing operations in this shell.")
+(defvar-local agent-shell-queue-transient--deferred nil
+  "Non-nil when an attempt to advance this queue was deferred.")
+(defvar agent-shell-queue-transient--target nil
+  "Shell captured while initializing the transient.")
+(defvar agent-shell-queue-transient-mode)
+
+(defun agent-shell-queue-transient--buffer ()
+  "Return the shell captured by the current menu, or resolve a shell."
+  (let ((buffer (or (and (bound-and-true-p transient-current-prefix)
+                         (object-of-class-p transient-current-prefix 'transient-prefix)
+                         (eq (oref transient-current-prefix command)
+                             'agent-shell-queue-transient)
+                         (oref transient-current-prefix scope))
+                    agent-shell-queue-transient--target
+                    (agent-shell--shell-buffer :no-create t))))
+    (unless (buffer-live-p buffer)
+      (user-error "The queue's shell is no longer live"))
+    buffer))
+
+(defun agent-shell-queue-transient--pending ()
+  "Return the current shell's pending queue."
+  (agent-shell--prompt-queue-migrate)
+  (map-elt agent-shell--state :pending-prompts))
+
+(defun agent-shell-queue-transient--process (original &rest args)
+  "Call ORIGINAL with ARGS unless queue processing is held or paused."
+  (if (or agent-shell-queue-transient--paused
+          (> agent-shell-queue-transient--holds 0))
+      (setq agent-shell-queue-transient--deferred t)
+    (apply original args)))
+
+(defun agent-shell-queue-transient--submit (original prompt)
+  "Call ORIGINAL with PROMPT, respecting a paused or held shell queue."
+  (with-current-buffer (agent-shell--shell-buffer :no-create t)
+    (if (or agent-shell-queue-transient--paused
+            (> agent-shell-queue-transient--holds 0))
+        (progn
+          (unless (shell-maker-busy)
+            (setq agent-shell-queue-transient--deferred t))
+          (agent-shell--prompt-queue-enqueue :prompt prompt))
+      (funcall original prompt))))
+
+(defun agent-shell-queue-transient--resume (original &rest args)
+  "Unpause the shell and call ORIGINAL with ARGS."
+  (with-current-buffer (agent-shell--shell-buffer :no-create t)
+    (setq agent-shell-queue-transient--paused nil
+          agent-shell-queue-transient--deferred nil)
+    (apply original args)))
+
+(defun agent-shell-queue-transient--held (function)
+  "Run FUNCTION in the target shell with automatic advancement held.
+Only a deferred advancement is retried when the hold ends.  A queue
+stopped by an error remains stopped.  Cancellation also releases the hold."
+  (let ((buffer (agent-shell-queue-transient--buffer)))
+    (with-current-buffer buffer
+      (setq agent-shell-queue-transient--holds
+            (1+ agent-shell-queue-transient--holds))
+      (unwind-protect
+          (funcall function)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (setq agent-shell-queue-transient--holds
+                  (1- agent-shell-queue-transient--holds))
+            (when (and (zerop agent-shell-queue-transient--holds)
+                       agent-shell-queue-transient--deferred
+                       (not agent-shell-queue-transient--paused)
+                       (not (shell-maker-busy)))
+              (setq agent-shell-queue-transient--deferred nil)
+              (agent-shell--prompt-queue-process-next))))))))
+
+(defun agent-shell-queue-transient--select ()
+  "Read the index of a pending prompt in the current shell."
+  (let ((choices (seq-map-indexed
+                  (lambda (prompt index)
+                    (cons (format "%d: %s" (1+ index)
+                                  (truncate-string-to-width
+                                   (replace-regexp-in-string "[\n\r]+" " " prompt)
+                                   90 nil nil "…"))
+                          index))
+                  (agent-shell-queue-transient--pending))))
+    (unless choices (user-error "No pending prompts"))
+    (alist-get (completing-read "Prompt: " choices nil t) choices nil nil #'equal)))
+
+(defun agent-shell-queue-transient-add ()
+  "Read a prompt and enqueue it, or send immediately when idle."
+  (interactive)
+  (with-current-buffer (agent-shell-queue-transient--buffer)
+    (call-interactively #'agent-shell-prompt-queue)))
+
+(defun agent-shell-queue-transient-add-next ()
+  "Read a prompt to insert at the front of the queue."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda ()
+     (let ((prompt (agent-shell--prompt-queue-read)))
+       (unless (string-blank-p prompt)
+         (map-put! agent-shell--state :pending-prompts
+                   (cons prompt (agent-shell-queue-transient--pending)))
+         (unless (shell-maker-busy)
+           (setq agent-shell-queue-transient--deferred t)))))))
+
+(defun agent-shell-queue-transient-edit ()
+  "Edit a pending prompt, preserving its position."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda ()
+     (let* ((index (agent-shell-queue-transient--select))
+            (old (nth index (agent-shell-queue-transient--pending)))
+            (prompt (agent-shell--prompt-queue-read :initial old)))
+       (when (string-blank-p prompt) (user-error "Prompt cannot be empty"))
+       (unless (eq old (nth index (agent-shell-queue-transient--pending)))
+         (user-error "Queue changed; select the prompt again"))
+       (setcar (nthcdr index (agent-shell-queue-transient--pending)) prompt)))))
+
+(defun agent-shell-queue-transient-view ()
+  "Display the full text of a pending prompt."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda ()
+     (let ((prompt (nth (agent-shell-queue-transient--select)
+                        (agent-shell-queue-transient--pending))))
+       (with-help-window "*Agent queue prompt*"
+         (princ prompt))))))
+
+(defun agent-shell-queue-transient-move-first ()
+  "Move a selected pending prompt to the front of the queue."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda ()
+     (let* ((index (agent-shell-queue-transient--select))
+            (pending (agent-shell-queue-transient--pending)))
+       (map-put! agent-shell--state :pending-prompts
+                 (cons (nth index pending)
+                       (append (seq-take pending index)
+                               (seq-drop pending (1+ index)))))))))
+
+(defun agent-shell-queue-transient-remove ()
+  "Select and remove one pending prompt."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda ()
+     (agent-shell-prompt-queue-remove (agent-shell-queue-transient--select)))))
+
+(defun agent-shell-queue-transient-clear ()
+  "Clear the pending queue after confirmation."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda () (agent-shell-prompt-queue-remove))))
+
+(defun agent-shell-queue-transient-pause ()
+  "Pause queue processing without interrupting the active turn."
+  (interactive)
+  (with-current-buffer (agent-shell-queue-transient--buffer)
+    (setq agent-shell-queue-transient--paused t)
+    (force-mode-line-update t)))
+
+(defun agent-shell-queue-transient-resume ()
+  "Resume automatic processing, starting the next prompt when idle."
+  (interactive)
+  (with-current-buffer (agent-shell-queue-transient--buffer)
+    (agent-shell-prompt-queue-resume)
+    (force-mode-line-update t)))
+
+(defun agent-shell-queue-transient--description ()
+  "Describe the target shell and preview its queue."
+  (with-current-buffer (agent-shell-queue-transient--buffer)
+    (format "%s · %s · %s · %d waiting\n%s"
+            (buffer-name) (if (shell-maker-busy) "working" "idle")
+            (if agent-shell-queue-transient--paused "paused" "automatic")
+            (length (agent-shell-queue-transient--pending))
+            (mapconcat #'identity
+                       (seq-map-indexed
+                        (lambda (prompt index)
+                          (format "  %d: %s" (1+ index)
+                                  (truncate-string-to-width
+                                   (replace-regexp-in-string "[\n\r]+" " " prompt)
+                                   70 nil nil "…")))
+                        (seq-take (agent-shell-queue-transient--pending) 3))
+                       "\n"))))
+
+(defun agent-shell-queue-transient--add-label ()
+  "Describe how adding a prompt will behave in the target shell."
+  (with-current-buffer (agent-shell-queue-transient--buffer)
+    (if (or agent-shell-queue-transient--paused (shell-maker-busy))
+        "Queue prompt…"
+      "Send prompt…")))
+
+;;;###autoload
+(transient-define-prefix agent-shell-queue-transient ()
+  "Manage prompts for the current shell or viewport."
+  [:description agent-shell-queue-transient--description
+   ["Add"
+    ("a" "Add prompt…" agent-shell-queue-transient-add
+     :description agent-shell-queue-transient--add-label :transient t)
+    ("n" "Add as next…" agent-shell-queue-transient-add-next :transient t)]
+   ["Queued prompts"
+    ("v" "View full prompt…" agent-shell-queue-transient-view)
+    ("e" "Edit…" agent-shell-queue-transient-edit :transient t)
+    ("m" "Move to front…" agent-shell-queue-transient-move-first :transient t)
+    ("d" "Remove…" agent-shell-queue-transient-remove :transient t)
+    ("D" "Clear queue…" agent-shell-queue-transient-clear :transient t)]
+   ["Processing"
+    ("p" "Pause after current" agent-shell-queue-transient-pause :transient t)
+    ("r" "Resume queue" agent-shell-queue-transient-resume :transient t)]]
+  (interactive)
+  (unless agent-shell-queue-transient-mode
+    (user-error "Enable agent-shell-queue-transient-mode first"))
+  (let ((agent-shell-queue-transient--target
+         (agent-shell--shell-buffer :no-create t)))
+    (transient-setup 'agent-shell-queue-transient nil nil
+                     :scope agent-shell-queue-transient--target)))
+
+(defun agent-shell-queue-transient--mode-line ()
+  "Return a pause indicator for a shell or its viewport."
+  (when (derived-mode-p 'agent-shell-mode 'agent-shell-viewport-view-mode
+                       'agent-shell-viewport-edit-mode)
+    (when-let* ((buffer (agent-shell--shell-buffer :no-create t :no-error t)))
+      (when (buffer-local-value 'agent-shell-queue-transient--paused buffer)
+        " Queue paused"))))
+
+;;;###autoload
+(define-minor-mode agent-shell-queue-transient-mode
+  "Enable per-shell queue pause and safe queue editing globally.
+Disabling clears pause state without submitting any pending prompts."
+  :global t
+  :group 'agent-shell
+  (dolist (entry '((agent-shell--prompt-queue-process-next . agent-shell-queue-transient--process)
+                   (agent-shell-prompt-queue . agent-shell-queue-transient--submit)
+                   (agent-shell-prompt-queue-resume . agent-shell-queue-transient--resume)))
+    (if agent-shell-queue-transient-mode
+        (advice-add (car entry) :around (cdr entry))
+      (advice-remove (car entry) (cdr entry))))
+  (if agent-shell-queue-transient-mode
+      (add-to-list 'global-mode-string
+                   '(:eval (agent-shell-queue-transient--mode-line)) t)
+    (setq global-mode-string
+          (delete '(:eval (agent-shell-queue-transient--mode-line)) global-mode-string))
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (setq agent-shell-queue-transient--paused nil
+              agent-shell-queue-transient--deferred nil))))
+  (force-mode-line-update t))
+
+(provide 'agent-shell-queue-transient)
+;;; agent-shell-queue-transient.el ends here

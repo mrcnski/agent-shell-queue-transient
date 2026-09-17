@@ -1,0 +1,213 @@
+;;; queue-tests.el --- Queue behavior tests -*- lexical-binding: t; -*-
+(require 'ert)
+(require 'cl-lib)
+(require 'agent-shell-queue-transient)
+
+(defmacro asqt-test-shell (&rest body)
+  "Run BODY with an isolated shell and real queue functions."
+  (declare (indent 0) (debug t))
+  `(with-temp-buffer
+     (setq major-mode 'agent-shell-mode)
+     (setq-local agent-shell--state (list (cons :pending-prompts nil)))
+     (let ((agent-shell-queue-transient--target (current-buffer))
+           (busy nil) sent)
+       (cl-letf (((symbol-function 'agent-shell--shell-buffer)
+                  (lambda (&rest _) agent-shell-queue-transient--target))
+                 ((symbol-function 'shell-maker-busy) (lambda (&rest _) busy))
+                 ((symbol-function 'agent-shell--prompt-queue-echo) #'ignore)
+                 ((symbol-function 'agent-shell--insert-to-shell-buffer)
+                  (lambda (&rest args)
+                    (push (plist-get args :text) sent)
+                    (setq busy t))))
+         (unwind-protect
+             (progn (agent-shell-queue-transient-mode 1) ,@body)
+           (agent-shell-queue-transient-mode -1))))))
+
+(ert-deftest asqt-add-busy-and-idle ()
+  (asqt-test-shell
+    (agent-shell-prompt-queue "first")
+    (should (equal sent '("first")))
+    (agent-shell-prompt-queue "second")
+    (should (equal (agent-shell-queue-transient--pending) '("second")))))
+
+(ert-deftest asqt-pause-and-resume ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    (agent-shell-prompt-queue "first")
+    (agent-shell-prompt-queue "second")
+    (agent-shell--prompt-queue-process-next)
+    (should-not sent)
+    (should (equal (agent-shell-queue-transient--pending) '("first" "second")))
+    (agent-shell-queue-transient-resume)
+    (should-not agent-shell-queue-transient--paused)
+    (should (equal sent '("first")))
+    (should (equal (agent-shell-queue-transient--pending) '("second")))))
+
+(ert-deftest asqt-resume-while-busy-does-not-send ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-queue-transient-pause)
+    (agent-shell-prompt-queue "later")
+    (agent-shell-queue-transient-resume)
+    (should-not sent)
+    (should-not agent-shell-queue-transient--paused)))
+
+(ert-deftest asqt-edit-defers-completion-and-preserves-order ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "first")
+    (agent-shell-prompt-queue "second")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "2: second"))
+              ((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest args)
+                 (should (equal (plist-get args :initial) "second"))
+                 (setq busy nil)
+                 (agent-shell--prompt-queue-process-next)
+                 (should-not sent)
+                 "edited")))
+      (agent-shell-queue-transient-edit))
+    (should (equal sent '("first")))
+    (should (equal (agent-shell-queue-transient--pending) '("edited")))
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-cancel-releases-hold ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "first")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "1: first"))
+              ((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _)
+                 (setq busy nil)
+                 (agent-shell--prompt-queue-process-next)
+                 (signal 'quit nil))))
+      (condition-case nil (agent-shell-queue-transient-edit) (quit nil)))
+    (should (equal sent '("first")))
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-edit-stopped-queue-does-not-start-it ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "first"))
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "1: first"))
+              ((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "edited")))
+      (agent-shell-queue-transient-edit))
+    (should-not sent)
+    (should (equal (agent-shell-queue-transient--pending) '("edited")))))
+
+(ert-deftest asqt-empty-edit-preserves-prompt ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "first"))
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "1: first"))
+              ((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "  ")))
+      (should-error (agent-shell-queue-transient-edit) :type 'user-error))
+    (should (equal (agent-shell-queue-transient--pending) '("first")))
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-reorder-and-add-next ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "first")
+    (agent-shell-prompt-queue "second")
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "2: second"))
+              ((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "urgent")))
+      (agent-shell-queue-transient-move-first)
+      (should (equal (agent-shell-queue-transient--pending) '("second" "first")))
+      (agent-shell-queue-transient-add-next))
+    (should (equal (agent-shell-queue-transient--pending) '("urgent" "second" "first")))
+    (should-not sent)))
+
+(ert-deftest asqt-remove-duplicate-by-position-and-clear ()
+  (asqt-test-shell
+    (setq busy t)
+    (dolist (prompt '("same" "middle" "same")) (agent-shell-prompt-queue prompt))
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "3: same"))
+              ((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+      (agent-shell-queue-transient-remove)
+      (should (equal (agent-shell-queue-transient--pending) '("same" "middle")))
+      (agent-shell-queue-transient-clear)
+      (should-not (agent-shell-queue-transient--pending)))))
+
+(ert-deftest asqt-pause-is-per-shell-and-disable-cleans-up ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    (with-temp-buffer (should-not agent-shell-queue-transient--paused))
+    (agent-shell-prompt-queue "later")
+    (agent-shell-queue-transient-mode -1)
+    (should-not agent-shell-queue-transient--paused)
+    (should-not sent)
+    (should-not (advice-member-p #'agent-shell-queue-transient--process
+                                 'agent-shell--prompt-queue-process-next))))
+
+(ert-deftest asqt-opening-menu-only-inspects ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "later"))
+    (cl-letf (((symbol-function 'transient-setup)
+               (lambda (name _layout _edit &rest args)
+                 (should (eq name 'agent-shell-queue-transient))
+                 (should (eq (plist-get args :scope) (current-buffer)))
+                 (should (string-match-p "1 waiting" (agent-shell-queue-transient--description))))))
+      (agent-shell-queue-transient))
+    (should-not sent)
+    (should-not agent-shell-queue-transient--paused)))
+
+(ert-deftest asqt-menu-scope-wins-over-current-buffer ()
+  (asqt-test-shell
+    (let* ((shell (current-buffer))
+           (transient-current-prefix
+            (transient-prefix :command 'agent-shell-queue-transient :scope shell)))
+      (with-temp-buffer
+        (should (eq (agent-shell-queue-transient--buffer) shell))))))
+
+(ert-deftest asqt-real-transient-layout ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "later"))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (unwind-protect
+          (progn
+            (agent-shell-queue-transient)
+            (should (eq (oref transient--prefix scope) (current-buffer)))
+            (with-current-buffer (get-buffer transient--buffer-name)
+              (should (string-match-p "1 waiting" (buffer-string)))
+              (should (string-match-p "Send prompt" (buffer-string)))))
+        (transient--emergency-exit)))))
+
+(ert-deftest asqt-add-next-idle-and-paused ()
+  (asqt-test-shell
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "urgent")))
+      (agent-shell-queue-transient-pause)
+      (agent-shell-queue-transient-add-next)
+      (should-not sent)
+      (should (equal (agent-shell-queue-transient--pending) '("urgent")))
+      (agent-shell-queue-transient-resume)
+      (should (equal sent '("urgent")))
+      (setq busy nil)
+      (agent-shell-queue-transient-add-next)
+      (should (equal sent '("urgent" "urgent"))))))
+
+(ert-deftest asqt-pause-indicator-in-viewport ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    (should (equal (agent-shell-queue-transient--mode-line) " Queue paused"))
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-viewport-view-mode)
+      (should (equal (agent-shell-queue-transient--mode-line) " Queue paused")))))
+
+(ert-deftest asqt-dead-target-errors ()
+  (let ((agent-shell-queue-transient--target (generate-new-buffer " *dead queue*")))
+    (kill-buffer agent-shell-queue-transient--target)
+    (should-error (agent-shell-queue-transient--buffer) :type 'user-error)))
+
+(ert-deftest asqt-clearing-deferred-queue-does-not-send ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "later")
+    (cl-letf (((symbol-function 'y-or-n-p)
+               (lambda (&rest _)
+                 (setq busy nil)
+                 (agent-shell--prompt-queue-process-next)
+                 t)))
+      (agent-shell-queue-transient-clear))
+    (should-not sent)
+    (should-not (agent-shell-queue-transient--pending))))
