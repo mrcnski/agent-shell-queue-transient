@@ -1,21 +1,27 @@
 # agent-shell-queue-transient
 
-A Transient menu for the prompt queue in agent-shell. Works from shell and
-viewport buffers, and captures the target session when the menu opens.
+A Transient menu for the prompt queue in agent-shell.
+
+Features:
+
+- Add to the front or the back of the queue.
+- Edit prompts in the queue.
+- Delete prompts, or clear the queue.
+- ... more?
+
+## Usage
+
+Invoke `agent-shell-queue-transient` in an agent-shell buffer.
 
 The entry command adapts to the queue:
 
 - Busy with an empty queue: read a new prompt directly.
-- Idle with an empty queue: move to the end of the shell input in its existing
-  window. In a viewport already showing the composer, leave the draft and cursor
-  in place. In a viewport showing a response, switch to editing mode.
+- Idle with an empty queue: move to the end of the shell input.
 - Pending prompts or an explicitly paused queue: show the menu.
 
-Cancelling the prompt reader leaves the draft and queue unchanged. If the agent
-finishes while you are typing, normal submission sends the prompt when accepted.
-The idle shortcut preserves existing draft text and does not submit anything.
-If invoked outside the shell or viewport, it selects an existing shell window
-or shows the shell in the current window without splitting it.
+## Installation
+
+Not on MELPA, but you can do:
 
 ```elisp
 (add-to-list 'load-path "~/.emacs.d/packages/agent-shell-queue-transient")
@@ -27,50 +33,12 @@ or shows the shell in the current window without splitting it.
   (keymap-set agent-shell-viewport-edit-mode-map "C-<return>" #'agent-shell-queue-transient))
 ```
 
-| Key | Action |
-| --- | --- |
-| `f` | Add a prompt to the front of the waiting queue |
-| `b` | Add a prompt to the back of the waiting queue |
-| `v` | View the complete text of a queued prompt |
-| `e` | Edit a prompt in place |
-| `m` | Move a prompt to the front |
-| `d` | Remove a selected prompt, with confirmation |
-| `D` | Clear the waiting queue, with confirmation |
-| `p` | Pause after the active turn |
-| `r` | Resume automatic processing |
-| `C-g` | Dismiss the menu |
-
-Both add actions only enqueue. They do not start an idle queue; use `r` to
-resume it. An already running, unpaused queue continues automatically after
-its active turn completes. The empty-queue shortcut retains normal submission
-behavior if the agent finishes while you type.
-
-The menu previews the first three pending prompts. Selection uses completion,
-with numbered entries so duplicate text is distinguishable. Viewing opens a
-help buffer; other actions keep the menu open and refresh it. Existing compose
-buffers are left intact; adding and editing use agent-shell's prompt reader,
-including its completion hooks.
-
-Pause belongs to the shell, is shown in the shell and viewport mode line, and
-lasts until explicitly resumed. It does not interrupt an active turn. Calls to
-`agent-shell-prompt-queue` also honor pause. Direct prompt submission outside
-that API remains available. Pause state is not persisted across Emacs restarts.
-
-While selecting, editing, reordering, or confirming removal, queue advancement
-is temporarily held. If a successful turn completes during that operation,
-advancement is retried afterward, including after cancellation. A queue stopped
-by failure is not started merely by viewing or editing it. Opening the menu
-itself does not pause or advance the queue.
-
 ## Compatibility
 
-Uses private agent-shell functions and its `:pending-prompts` state. Tested
-against the local agent-shell checkout (0.76.1). Upstream changes may require
-updates here. Disabling `agent-shell-queue-transient-mode` removes advice and
-clears pause state without submitting anything. Use the normal queue resume
-command to continue a waiting queue afterward.
+Uses private agent-shell functions and its `:pending-prompts` state.  Upstream
+changes may require updates here.
 
-## Tests
+## Testing
 
 With agent-shell and its dependencies installed:
 
@@ -80,8 +48,6 @@ AGENT_SHELL_DIR=/path/to/agent-shell \
 emacs --batch -Q -l tests/run-tests.el
 ```
 
-`AGENT_SHELL_DIR` is optional; it selects a checkout ahead of installed packages.
-The tests exercise the real upstream queue operations, mocking agent submission
-and user input. They do not contact an agent or run a full Emacs configuration.
+## License
 
-License: GPL-3.0-or-later.
+GPL-3.0-or-later.
