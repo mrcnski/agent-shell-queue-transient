@@ -185,21 +185,31 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
     (force-mode-line-update t)))
 
 (defun agent-shell-queue-transient--description ()
-  "Describe the target shell and preview its queue."
+  "Return the target shell's buffer name for the heading."
+  (buffer-name (agent-shell-queue-transient--buffer)))
+
+(defun agent-shell-queue-transient--status ()
+  "Return the queue state with subdued styling."
   (with-current-buffer (agent-shell-queue-transient--buffer)
-    (format "%s · %s · %s · %d waiting\n%s"
-            (buffer-name) (if (shell-maker-busy) "working" "idle")
-            (if agent-shell-queue-transient--paused "paused" "automatic")
-            (length (agent-shell-queue-transient--pending))
-            (mapconcat #'identity
-                       (seq-map-indexed
-                        (lambda (prompt index)
-                          (format "  %d: %s" (1+ index)
-                                  (truncate-string-to-width
-                                   (replace-regexp-in-string "[\n\r]+" " " prompt)
-                                   70 nil nil "…")))
-                        (seq-take (agent-shell-queue-transient--pending) 3))
-                       "\n"))))
+    (propertize
+     (format "%s · %s · %d waiting"
+             (if (shell-maker-busy) "working" "idle")
+             (if agent-shell-queue-transient--paused "paused" "automatic")
+             (length (agent-shell-queue-transient--pending)))
+     'face 'shadow)))
+
+(defun agent-shell-queue-transient--preview ()
+  "Return a preview of the first three queued entries."
+  (with-current-buffer (agent-shell-queue-transient--buffer)
+    (mapconcat #'identity
+               (seq-map-indexed
+                (lambda (prompt index)
+                  (format "  %d: %s" (1+ index)
+                          (truncate-string-to-width
+                           (replace-regexp-in-string "[\n\r]+" " " prompt)
+                           70 nil nil "…")))
+                (seq-take (agent-shell-queue-transient--pending) 3))
+               "\n")))
 
 (defun agent-shell-queue-transient--add-label ()
   "Describe how adding a prompt will behave in the target shell."
@@ -212,7 +222,9 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
 (transient-define-prefix agent-shell-queue-transient ()
   "Manage prompts for the current shell or viewport."
   [:description agent-shell-queue-transient--description
-   ["Add"
+   (:info #'agent-shell-queue-transient--status)
+   (:info #'agent-shell-queue-transient--preview)]
+  [["Add"
     ("a" "Add prompt…" agent-shell-queue-transient-add
      :description agent-shell-queue-transient--add-label :transient t)
     ("n" "Add as next…" agent-shell-queue-transient-add-next :transient t)]
