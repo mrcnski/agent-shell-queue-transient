@@ -224,8 +224,11 @@ Do not start an idle queue.  An already running queue continues normally."
 ;;;###autoload
 (transient-define-prefix agent-shell-queue-transient ()
   "Manage prompts for the current shell or viewport.
-With an empty, unpaused queue, read a prompt directly when busy, or
-focus the composer when idle.  Otherwise show the queue menu."
+With an empty, unpaused queue, read a new prompt directly when busy.
+When idle, move to the end of the shell input in its existing window,
+leave an open viewport composer and its cursor unchanged, or switch a
+response viewport to editing mode.  Preserve drafts and submit nothing.
+Otherwise show the queue menu."
   [:description agent-shell-queue-transient--description
    (:info #'agent-shell-queue-transient--status)
    (:info #'agent-shell-queue-transient--preview)]
@@ -255,12 +258,15 @@ focus the composer when idle.  Otherwise show the queue menu."
      ((with-current-buffer agent-shell-queue-transient--target
         (shell-maker-busy))
       (agent-shell-queue-transient-add))
-     ((derived-mode-p 'agent-shell-viewport-view-mode
-                      'agent-shell-viewport-edit-mode)
+     ((derived-mode-p 'agent-shell-viewport-edit-mode)
+      nil)
+     ((derived-mode-p 'agent-shell-viewport-view-mode)
       (agent-shell-viewport--show-buffer
        :shell-buffer agent-shell-queue-transient--target :edit t))
      (t
-      (pop-to-buffer agent-shell-queue-transient--target)
+      (if-let* ((window (get-buffer-window agent-shell-queue-transient--target)))
+          (select-window window)
+        (switch-to-buffer agent-shell-queue-transient--target))
       (goto-char (point-max))))))
 
 (defun agent-shell-queue-transient--mode-line ()

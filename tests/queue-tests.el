@@ -321,3 +321,31 @@
       (agent-shell-queue-transient-add-front))
     (should (equal sent '("first")))
     (should (equal (agent-shell-queue-transient--pending) '("existing")))))
+
+(ert-deftest asqt-idle-shell-reuses-window-despite-popup-rules ()
+  (asqt-test-shell
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (insert "draft")
+      (goto-char (point-min))
+      (let ((window (selected-window))
+            (windows (window-list))
+            (display-buffer-alist
+             '((".*" (display-buffer-pop-up-window) (inhibit-same-window . t)))))
+        (agent-shell-queue-transient)
+        (should (eq (selected-window) window))
+        (should (equal (window-list) windows))
+        (should (= (point) (point-max)))
+        (should (equal (buffer-string) "draft"))))))
+
+(ert-deftest asqt-idle-edit-keeps-composer-and-point ()
+  (asqt-test-shell
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-viewport-edit-mode)
+      (insert "draft")
+      (goto-char 3)
+      (cl-letf (((symbol-function 'agent-shell-viewport--show-buffer)
+                 (lambda (&rest _) (ert-fail "Redisplayed existing composer"))))
+        (agent-shell-queue-transient))
+      (should (= (point) 3))
+      (should (equal (buffer-string) "draft")))))

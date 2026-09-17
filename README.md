@@ -6,12 +6,16 @@ viewport buffers, and captures the target session when the menu opens.
 The entry command adapts to the queue:
 
 - Busy with an empty queue: read a new prompt directly.
-- Idle with an empty queue: focus the shell input or viewport composer.
+- Idle with an empty queue: move to the end of the shell input in its existing
+  window. In a viewport already showing the composer, leave the draft and cursor
+  in place. In a viewport showing a response, switch to editing mode.
 - Pending prompts or an explicitly paused queue: show the menu.
 
 Cancelling the prompt reader leaves the draft and queue unchanged. If the agent
 finishes while you are typing, normal submission sends the prompt when accepted.
 The idle shortcut preserves existing draft text and does not submit anything.
+If invoked outside the shell or viewport, it selects an existing shell window
+or shows the shell in the current window without splitting it.
 
 ```elisp
 (add-to-list 'load-path "~/.emacs.d/packages/agent-shell-queue-transient")
