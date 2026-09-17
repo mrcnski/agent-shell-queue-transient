@@ -25,8 +25,8 @@ The idle shortcut preserves existing draft text and does not submit anything.
 
 | Key | Action |
 | --- | --- |
-| `a` | Add a prompt; send immediately when idle unless paused |
-| `n` | Add a prompt ahead of the waiting queue |
+| `f` | Add a prompt to the front of the waiting queue |
+| `b` | Add a prompt to the back of the waiting queue |
 | `v` | View the complete text of a queued prompt |
 | `e` | Edit a prompt in place |
 | `m` | Move a prompt to the front |
@@ -35,6 +35,11 @@ The idle shortcut preserves existing draft text and does not submit anything.
 | `p` | Pause after the active turn |
 | `r` | Resume automatic processing |
 | `C-g` | Dismiss the menu |
+
+Both add actions only enqueue. They do not start an idle queue; use `r` to
+resume it. An already running, unpaused queue continues automatically after
+its active turn completes. The empty-queue shortcut retains normal submission
+behavior if the agent finishes while you type.
 
 The menu previews the first three pending prompts. Selection uses completion,
 with numbered entries so duplicate text is distinguishable. Viewing opens a

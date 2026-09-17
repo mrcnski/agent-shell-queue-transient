@@ -110,17 +110,27 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
   (with-current-buffer (agent-shell-queue-transient--buffer)
     (call-interactively #'agent-shell-prompt-queue)))
 
-(defun agent-shell-queue-transient-add-next ()
-  "Read a prompt to insert at the front of the queue."
-  (interactive)
+(defun agent-shell-queue-transient--enqueue (front)
+  "Read a prompt and enqueue it at the back, or at the front if FRONT.
+Do not start an idle queue.  An already running queue continues normally."
   (agent-shell-queue-transient--held
    (lambda ()
      (let ((prompt (agent-shell--prompt-queue-read)))
        (unless (string-blank-p prompt)
-         (map-put! agent-shell--state :pending-prompts
-                   (cons prompt (agent-shell-queue-transient--pending)))
-         (unless (shell-maker-busy)
-           (setq agent-shell-queue-transient--deferred t)))))))
+         (if front
+             (map-put! agent-shell--state :pending-prompts
+                       (cons prompt (agent-shell-queue-transient--pending)))
+           (agent-shell--prompt-queue-enqueue :prompt prompt)))))))
+
+(defun agent-shell-queue-transient-add-front ()
+  "Read a prompt to enqueue before all waiting entries."
+  (interactive)
+  (agent-shell-queue-transient--enqueue t))
+
+(defun agent-shell-queue-transient-add-back ()
+  "Read a prompt to enqueue after all waiting entries."
+  (interactive)
+  (agent-shell-queue-transient--enqueue nil))
 
 (defun agent-shell-queue-transient-edit ()
   "Edit a pending prompt, preserving its position."
@@ -211,13 +221,6 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
                 (seq-take (agent-shell-queue-transient--pending) 3))
                "\n")))
 
-(defun agent-shell-queue-transient--add-label ()
-  "Describe how adding a prompt will behave in the target shell."
-  (with-current-buffer (agent-shell-queue-transient--buffer)
-    (if (or agent-shell-queue-transient--paused (shell-maker-busy))
-        "Queue prompt…"
-      "Send prompt…")))
-
 ;;;###autoload
 (transient-define-prefix agent-shell-queue-transient ()
   "Manage prompts for the current shell or viewport.
@@ -227,9 +230,8 @@ focus the composer when idle.  Otherwise show the queue menu."
    (:info #'agent-shell-queue-transient--status)
    (:info #'agent-shell-queue-transient--preview)]
   [["Add"
-    ("a" "Add prompt…" agent-shell-queue-transient-add
-     :description agent-shell-queue-transient--add-label :transient t)
-    ("n" "Add as next…" agent-shell-queue-transient-add-next :transient t)]
+    ("f" "Add to front…" agent-shell-queue-transient-add-front :transient t)
+    ("b" "Add to back…" agent-shell-queue-transient-add-back :transient t)]
    ["Queued prompts"
     ("v" "View full prompt…" agent-shell-queue-transient-view)
     ("e" "Edit…" agent-shell-queue-transient-edit :transient t)

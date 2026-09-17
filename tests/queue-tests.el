@@ -104,7 +104,7 @@
     (should (equal (agent-shell-queue-transient--pending) '("first")))
     (should (zerop agent-shell-queue-transient--holds))))
 
-(ert-deftest asqt-reorder-and-add-next ()
+(ert-deftest asqt-reorder-and-add-front ()
   (asqt-test-shell
     (setq busy t)
     (agent-shell-prompt-queue "first")
@@ -113,7 +113,7 @@
               ((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "urgent")))
       (agent-shell-queue-transient-move-first)
       (should (equal (agent-shell-queue-transient--pending) '("second" "first")))
-      (agent-shell-queue-transient-add-next))
+      (agent-shell-queue-transient-add-front))
     (should (equal (agent-shell-queue-transient--pending) '("urgent" "second" "first")))
     (should-not sent)))
 
@@ -172,21 +172,24 @@
               (goto-char (point-min))
               (search-forward "idle · automatic · 1 waiting")
               (should (eq (get-text-property (1- (point)) 'face) 'shadow))
-              (should (string-match-p "Send prompt" (buffer-string)))))
+              (should (string-match-p "f Add to front" (buffer-string)))
+              (should (string-match-p "b Add to back" (buffer-string)))
+              (should-not (string-match-p "Send prompt" (buffer-string)))))
         (transient--emergency-exit)))))
 
-(ert-deftest asqt-add-next-idle-and-paused ()
+(ert-deftest asqt-add-front-idle-and-paused ()
   (asqt-test-shell
     (cl-letf (((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "urgent")))
       (agent-shell-queue-transient-pause)
-      (agent-shell-queue-transient-add-next)
+      (agent-shell-queue-transient-add-front)
       (should-not sent)
       (should (equal (agent-shell-queue-transient--pending) '("urgent")))
       (agent-shell-queue-transient-resume)
       (should (equal sent '("urgent")))
       (setq busy nil)
-      (agent-shell-queue-transient-add-next)
-      (should (equal sent '("urgent" "urgent"))))))
+      (agent-shell-queue-transient-add-front)
+      (should (equal sent '("urgent")))
+      (should (equal (agent-shell-queue-transient--pending) '("urgent"))))))
 
 (ert-deftest asqt-pause-indicator-in-viewport ()
   (asqt-test-shell
@@ -282,3 +285,39 @@
       (agent-shell-queue-transient))
     (should (equal sent '("follow-up")))
     (should-not (agent-shell-queue-transient--pending))))
+
+(ert-deftest asqt-add-positions-preserve-stopped-queue ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "existing"))
+    (let ((inputs '("last" "first")))
+      (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+                 (lambda (&rest _) (pop inputs))))
+        (agent-shell-queue-transient-add-back)
+        (agent-shell-queue-transient-add-front)))
+    (should (equal (agent-shell-queue-transient--pending) '("first" "existing" "last")))
+    (should-not sent)
+    (agent-shell-queue-transient-resume)
+    (should (equal sent '("first")))))
+
+(ert-deftest asqt-add-back-keeps-paused-queue-paused ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _) "later")))
+      (agent-shell-queue-transient-add-back))
+    (should agent-shell-queue-transient--paused)
+    (should-not sent)
+    (should (equal (agent-shell-queue-transient--pending) '("later")))))
+
+(ert-deftest asqt-add-front-allows-running-queue-to-continue ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "existing")
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _)
+                 (setq busy nil)
+                 (agent-shell--prompt-queue-process-next)
+                 "first")))
+      (agent-shell-queue-transient-add-front))
+    (should (equal sent '("first")))
+    (should (equal (agent-shell-queue-transient--pending) '("existing")))))
