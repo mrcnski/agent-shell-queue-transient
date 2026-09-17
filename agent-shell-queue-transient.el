@@ -220,7 +220,9 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
 
 ;;;###autoload
 (transient-define-prefix agent-shell-queue-transient ()
-  "Manage prompts for the current shell or viewport."
+  "Manage prompts for the current shell or viewport.
+With an empty, unpaused queue, read a prompt directly when busy, or
+focus the composer when idle.  Otherwise show the queue menu."
   [:description agent-shell-queue-transient--description
    (:info #'agent-shell-queue-transient--status)
    (:info #'agent-shell-queue-transient--preview)]
@@ -242,8 +244,22 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
     (user-error "Enable agent-shell-queue-transient-mode first"))
   (let ((agent-shell-queue-transient--target
          (agent-shell--shell-buffer :no-create t)))
-    (transient-setup 'agent-shell-queue-transient nil nil
-                     :scope agent-shell-queue-transient--target)))
+    (cond
+     ((with-current-buffer agent-shell-queue-transient--target
+        (or agent-shell-queue-transient--paused
+            (agent-shell-queue-transient--pending)))
+      (transient-setup 'agent-shell-queue-transient nil nil
+                       :scope agent-shell-queue-transient--target))
+     ((with-current-buffer agent-shell-queue-transient--target
+        (shell-maker-busy))
+      (agent-shell-queue-transient-add))
+     ((derived-mode-p 'agent-shell-viewport-view-mode
+                      'agent-shell-viewport-edit-mode)
+      (agent-shell-viewport--show-buffer
+       :shell-buffer agent-shell-queue-transient--target :edit t))
+     (t
+      (pop-to-buffer agent-shell-queue-transient--target)
+      (goto-char (point-max))))))
 
 (defun agent-shell-queue-transient--mode-line ()
   "Return a pause indicator for a shell or its viewport."

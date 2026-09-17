@@ -213,3 +213,72 @@
       (agent-shell-queue-transient-clear))
     (should-not sent)
     (should-not (agent-shell-queue-transient--pending))))
+
+(ert-deftest asqt-empty-busy-reads-without-menu ()
+  (asqt-test-shell
+    (setq busy t)
+    (insert "existing draft")
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _) "follow-up"))
+              ((symbol-function 'transient-setup)
+               (lambda (&rest _) (ert-fail "Unexpected menu"))))
+      (agent-shell-queue-transient))
+    (should (equal (agent-shell-queue-transient--pending) '("follow-up")))
+    (should (equal (buffer-string) "existing draft"))
+    (should-not sent)))
+
+(ert-deftest asqt-empty-busy-cancel-preserves-draft ()
+  (asqt-test-shell
+    (setq busy t)
+    (insert "existing draft")
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _) (signal 'quit nil))))
+      (condition-case nil (agent-shell-queue-transient) (quit nil)))
+    (should (equal (buffer-string) "existing draft"))
+    (should-not (agent-shell-queue-transient--pending))
+    (should-not sent)))
+
+(ert-deftest asqt-empty-idle-focuses-shell-input ()
+  (asqt-test-shell
+    (insert "existing draft")
+    (goto-char (point-min))
+    (save-window-excursion
+      (cl-letf (((symbol-function 'transient-setup)
+                 (lambda (&rest _) (ert-fail "Unexpected menu"))))
+        (agent-shell-queue-transient))
+      (should (eq (window-buffer) agent-shell-queue-transient--target))
+      (should (= (point) (point-max)))
+      (should (equal (buffer-string) "existing draft")))
+    (should-not sent)))
+
+(ert-deftest asqt-empty-idle-focuses-viewport-composer ()
+  (asqt-test-shell
+    (let ((shell (current-buffer)) opened)
+      (with-temp-buffer
+        (setq major-mode 'agent-shell-viewport-view-mode)
+        (cl-letf (((symbol-function 'agent-shell-viewport--show-buffer)
+                   (lambda (&rest args) (setq opened args))))
+          (agent-shell-queue-transient)))
+      (should (eq (plist-get opened :shell-buffer) shell))
+      (should (plist-get opened :edit)))
+    (should-not sent)))
+
+(ert-deftest asqt-empty-paused-opens-menu ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    (let (opened)
+      (cl-letf (((symbol-function 'transient-setup)
+                 (lambda (&rest _) (setq opened t))))
+        (agent-shell-queue-transient))
+      (should opened))
+    (should agent-shell-queue-transient--paused)
+    (should-not sent)))
+
+(ert-deftest asqt-agent-finishes-during-direct-entry ()
+  (asqt-test-shell
+    (setq busy t)
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _) (setq busy nil) "follow-up")))
+      (agent-shell-queue-transient))
+    (should (equal sent '("follow-up")))
+    (should-not (agent-shell-queue-transient--pending))))

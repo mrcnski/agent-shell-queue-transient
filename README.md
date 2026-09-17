@@ -3,14 +3,24 @@
 A Transient menu for the prompt queue in agent-shell. Works from shell and
 viewport buffers, and captures the target session when the menu opens.
 
+The entry command adapts to the queue:
+
+- Busy with an empty queue: read a new prompt directly.
+- Idle with an empty queue: focus the shell input or viewport composer.
+- Pending prompts or an explicitly paused queue: show the menu.
+
+Cancelling the prompt reader leaves the draft and queue unchanged. If the agent
+finishes while you are typing, normal submission sends the prompt when accepted.
+The idle shortcut preserves existing draft text and does not submit anything.
+
 ```elisp
 (add-to-list 'load-path "~/.emacs.d/packages/agent-shell-queue-transient")
 (require 'agent-shell-queue-transient)
 (agent-shell-queue-transient-mode 1)
-(keymap-set agent-shell-mode-map "C-c q" #'agent-shell-queue-transient)
+(keymap-set agent-shell-mode-map "C-<return>" #'agent-shell-queue-transient)
 (with-eval-after-load 'agent-shell-viewport
-  (keymap-set agent-shell-viewport-view-mode-map "C-c q" #'agent-shell-queue-transient)
-  (keymap-set agent-shell-viewport-edit-mode-map "C-c q" #'agent-shell-queue-transient))
+  (keymap-set agent-shell-viewport-view-mode-map "C-<return>" #'agent-shell-queue-transient)
+  (keymap-set agent-shell-viewport-edit-mode-map "C-<return>" #'agent-shell-queue-transient))
 ```
 
 | Key | Action |
