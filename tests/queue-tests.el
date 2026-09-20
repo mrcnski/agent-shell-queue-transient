@@ -216,6 +216,14 @@ SENT (prompts submitted so far, newest first)."
     (cl-letf (((symbol-function 'agent-shell--shell-buffer) (lambda (&rest _) dead)))
       (should-error (agent-shell-queue-transient--buffer) :type 'user-error))))
 
+(ert-deftest asqt-empty-selection-errors ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "first"))
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "")))
+      (should-error (agent-shell-queue-transient-edit) :type 'user-error))
+    (should (equal (agent-shell-queue-transient--pending) '("first")))
+    (should (zerop agent-shell-queue-transient--holds))))
+
 (ert-deftest asqt-clearing-deferred-queue-does-not-send ()
   (asqt-test-shell
     (setq busy t)

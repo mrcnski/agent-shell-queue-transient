@@ -97,7 +97,9 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
                           index))
                   (agent-shell-queue-transient--pending))))
     (unless choices (user-error "No pending prompts"))
-    (alist-get (completing-read "Prompt: " choices nil t) choices nil nil #'equal)))
+    (or (alist-get (completing-read "Prompt: " choices nil t)
+                   choices nil nil #'equal)
+        (user-error "No prompt selected"))))
 
 (defun agent-shell-queue-transient-add ()
   "Read a prompt and enqueue it, or send immediately when idle."
