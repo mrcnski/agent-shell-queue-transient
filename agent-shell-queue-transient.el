@@ -23,18 +23,13 @@
   "Number of active queue editing operations in this shell.")
 (defvar-local agent-shell-queue-transient--deferred nil
   "Non-nil when an attempt to advance this queue was deferred.")
-(defvar agent-shell-queue-transient--target nil
-  "Shell captured while initializing the transient.")
 (defvar agent-shell-queue-transient-mode)
 
 (defun agent-shell-queue-transient--buffer ()
-  "Return the shell captured by the current menu, or resolve a shell."
-  (let ((buffer (or (and (bound-and-true-p transient-current-prefix)
-                         (object-of-class-p transient-current-prefix 'transient-prefix)
-                         (eq (oref transient-current-prefix command)
-                             'agent-shell-queue-transient)
-                         (oref transient-current-prefix scope))
-                    agent-shell-queue-transient--target
+  "Return the shell captured by the current menu, or resolve a shell.
+The menu's scope is honoured while it is being set up, redisplayed, or
+running one of its commands; otherwise resolve from the current buffer."
+  (let ((buffer (or (transient-scope 'agent-shell-queue-transient)
                     (agent-shell--shell-buffer :no-create t))))
     (unless (buffer-live-p buffer)
       (user-error "The queue's shell is no longer live"))
@@ -247,26 +242,22 @@ Otherwise show the queue menu."
   (interactive)
   (unless agent-shell-queue-transient-mode
     (user-error "Enable agent-shell-queue-transient-mode first"))
-  (let ((agent-shell-queue-transient--target
-         (agent-shell--shell-buffer :no-create t)))
+  (let ((shell (agent-shell--shell-buffer :no-create t)))
     (cond
-     ((with-current-buffer agent-shell-queue-transient--target
+     ((with-current-buffer shell
         (or agent-shell-queue-transient--paused
             (agent-shell-queue-transient--pending)))
-      (transient-setup 'agent-shell-queue-transient nil nil
-                       :scope agent-shell-queue-transient--target))
-     ((with-current-buffer agent-shell-queue-transient--target
-        (shell-maker-busy))
+      (transient-setup 'agent-shell-queue-transient nil nil :scope shell))
+     ((with-current-buffer shell (shell-maker-busy))
       (agent-shell-queue-transient-add))
      ((derived-mode-p 'agent-shell-viewport-edit-mode)
       nil)
      ((derived-mode-p 'agent-shell-viewport-view-mode)
-      (agent-shell-viewport--show-buffer
-       :shell-buffer agent-shell-queue-transient--target :edit t))
+      (agent-shell-viewport--show-buffer :shell-buffer shell :edit t))
      (t
-      (if-let* ((window (get-buffer-window agent-shell-queue-transient--target)))
+      (if-let* ((window (get-buffer-window shell)))
           (select-window window)
-        (switch-to-buffer agent-shell-queue-transient--target))
+        (switch-to-buffer shell))
       (goto-char (point-max))))))
 
 (defun agent-shell-queue-transient--mode-line ()

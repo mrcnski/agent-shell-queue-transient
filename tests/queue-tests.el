@@ -4,15 +4,17 @@
 (require 'agent-shell-queue-transient)
 
 (defmacro asqt-test-shell (&rest body)
-  "Run BODY with an isolated shell and real queue functions."
+  "Run BODY with an isolated shell and real queue functions.
+BODY sees SHELL (the shell buffer), BUSY (settable busy state) and
+SENT (prompts submitted so far, newest first)."
   (declare (indent 0) (debug t))
   `(with-temp-buffer
      (setq major-mode 'agent-shell-mode)
      (setq-local agent-shell--state (list (cons :pending-prompts nil)))
-     (let ((agent-shell-queue-transient--target (current-buffer))
+     (let ((shell (current-buffer))
            (busy nil) sent)
        (cl-letf (((symbol-function 'agent-shell--shell-buffer)
-                  (lambda (&rest _) agent-shell-queue-transient--target))
+                  (lambda (&rest _) shell))
                  ((symbol-function 'shell-maker-busy) (lambda (&rest _) busy))
                  ((symbol-function 'agent-shell--prompt-queue-echo) #'ignore)
                  ((symbol-function 'agent-shell--insert-to-shell-buffer)
@@ -153,11 +155,20 @@
 
 (ert-deftest asqt-menu-scope-wins-over-current-buffer ()
   (asqt-test-shell
-    (let* ((shell (current-buffer))
-           (transient-current-prefix
-            (transient-prefix :command 'agent-shell-queue-transient :scope shell)))
+    (let ((prefix (transient-prefix :command 'agent-shell-queue-transient :scope shell))
+          (other (transient-prefix :command 'ignore :scope shell)))
       (with-temp-buffer
-        (should (eq (agent-shell-queue-transient--buffer) shell))))))
+        (cl-letf (((symbol-function 'agent-shell--shell-buffer)
+                   (lambda (&rest _) (current-buffer))))
+          ;; Suffix commands see `transient-current-prefix'.
+          (let ((transient-current-prefix prefix))
+            (should (eq (agent-shell-queue-transient--buffer) shell)))
+          ;; Setup and redisplay see `transient--prefix'.
+          (let ((transient--prefix prefix))
+            (should (eq (agent-shell-queue-transient--buffer) shell)))
+          ;; Another menu's scope is ignored.
+          (let ((transient-current-prefix other))
+            (should (eq (agent-shell-queue-transient--buffer) (current-buffer)))))))))
 
 (ert-deftest asqt-real-transient-layout ()
   (asqt-test-shell
@@ -200,9 +211,10 @@
       (should (equal (agent-shell-queue-transient--mode-line) " Queue paused")))))
 
 (ert-deftest asqt-dead-target-errors ()
-  (let ((agent-shell-queue-transient--target (generate-new-buffer " *dead queue*")))
-    (kill-buffer agent-shell-queue-transient--target)
-    (should-error (agent-shell-queue-transient--buffer) :type 'user-error)))
+  (let ((dead (generate-new-buffer " *dead queue*")))
+    (kill-buffer dead)
+    (cl-letf (((symbol-function 'agent-shell--shell-buffer) (lambda (&rest _) dead)))
+      (should-error (agent-shell-queue-transient--buffer) :type 'user-error))))
 
 (ert-deftest asqt-clearing-deferred-queue-does-not-send ()
   (asqt-test-shell
@@ -249,7 +261,7 @@
       (cl-letf (((symbol-function 'transient-setup)
                  (lambda (&rest _) (ert-fail "Unexpected menu"))))
         (agent-shell-queue-transient))
-      (should (eq (window-buffer) agent-shell-queue-transient--target))
+      (should (eq (window-buffer) shell))
       (should (= (point) (point-max)))
       (should (equal (buffer-string) "existing draft")))
     (should-not sent)))
