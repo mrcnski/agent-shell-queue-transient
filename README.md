@@ -26,13 +26,18 @@ The entry command adapts to the queue:
 Not on MELPA, but you can do:
 
 ```elisp
-(add-to-list 'load-path "~/.emacs.d/packages/agent-shell-queue-transient")
-(require 'agent-shell-queue-transient)
-(agent-shell-queue-transient-mode 1)
-(keymap-set agent-shell-mode-map "C-<return>" #'agent-shell-queue-transient)
-(with-eval-after-load 'agent-shell-viewport
-  (keymap-set agent-shell-viewport-view-mode-map "C-<return>" #'agent-shell-queue-transient)
-  (keymap-set agent-shell-viewport-edit-mode-map "C-<return>" #'agent-shell-queue-transient))
+(use-package agent-shell-queue-transient
+  :load-path "~/.emacs.d/packages/agent-shell-queue-transient"
+  :after agent-shell
+  :demand t
+  :bind (:map agent-shell-mode-map
+         ("C-<return>" . agent-shell-queue-transient)
+         :map agent-shell-viewport-view-mode-map
+         ("C-<return>" . agent-shell-queue-transient)
+         :map agent-shell-viewport-edit-mode-map
+         ("C-<return>" . agent-shell-queue-transient))
+  :config
+  (agent-shell-queue-transient-mode 1))
 ```
 
 ## Compatibility
