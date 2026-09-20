@@ -2,6 +2,8 @@
 
 A Transient menu for the prompt queue in agent-shell.
 
+<img src="screenshot.png" alt="A Transient menu for the prompt queue in agent-shell." width="600">
+
 Features:
 
 - Add to the front or the back of the queue.
