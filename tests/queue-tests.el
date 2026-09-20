@@ -500,7 +500,7 @@ SENT (prompts submitted so far, newest first)."
   (asqt-test-shell
     (map-put! agent-shell--state :pending-prompts
               (list "one\ntwo" (make-string 100 ?x) "three" "four"))
-    (let ((lines (split-string (agent-shell-queue-transient--preview) "\n")))
+    (let ((lines (agent-shell-queue-transient--preview)))
       (should (equal (length lines) 3))
       (should (equal (nth 0 lines) "  1: one two"))
       (should (string-prefix-p "  2: xxx" (nth 1 lines)))
@@ -521,3 +521,36 @@ SENT (prompts submitted so far, newest first)."
     (should (member agent-shell-queue-transient--mode-line-construct global-mode-string))
     (agent-shell-queue-transient-mode -1)
     (should-not (member agent-shell-queue-transient--mode-line-construct global-mode-string))))
+
+(ert-deftest asqt-heading-children-append-one-info-per-entry ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "alpha" "beta"))
+    (let ((children (agent-shell-queue-transient--heading-children '(status))))
+      (should (eq (car children) 'status))
+      (should (= (length children) 3)))
+    (map-put! agent-shell--state :pending-prompts nil)
+    (should (equal (agent-shell-queue-transient--heading-children '(status))
+                   '(status)))))
+
+(ert-deftest asqt-real-transient-aligns-queue-entries ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "alpha" "beta"))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (unwind-protect
+          (progn
+            (agent-shell-queue-transient)
+            (should (oref transient--prefix refresh-suffixes))
+            (let* ((lines (with-current-buffer (get-buffer transient--buffer-name)
+                            (split-string (buffer-string) "\n")))
+                   (find (lambda (text)
+                           (let ((line (seq-find (lambda (l) (string-search text l)) lines)))
+                             (should line)
+                             (string-search text line))))
+                   (status (funcall find "idle · automatic · 2 waiting"))
+                   (first (funcall find "1: alpha"))
+                   (second (funcall find "2: beta")))
+              ;; Entries line up with each other, indented under the status.
+              (should (= first second))
+              (should (> first status))))
+        (transient--emergency-exit)))))

@@ -219,14 +219,22 @@ Do not start an idle queue.  An already running queue continues normally."
      'face 'shadow)))
 
 (defun agent-shell-queue-transient--preview ()
-  "Return a preview of the first three queued entries."
+  "Return one indented line for each of the first three queued entries."
   (with-current-buffer (agent-shell-queue-transient--buffer)
-    (mapconcat (lambda (entry)
-                 (concat "  " (agent-shell-queue-transient--label
-                               (car entry) (cdr entry) 70)))
-               (seq-map-indexed #'cons
-                                (seq-take (agent-shell-queue-transient--pending) 3))
-               "\n")))
+    (seq-map-indexed
+     (lambda (prompt index)
+       (concat "  " (agent-shell-queue-transient--label prompt index 70)))
+     (seq-take (agent-shell-queue-transient--pending) 3))))
+
+(defun agent-shell-queue-transient--heading-children (children)
+  "Return CHILDREN followed by one info line per previewed queue entry.
+Transient indents only the first line of a multi-line info item, so
+each entry gets an info item of its own to keep them aligned."
+  (append children
+          (transient-parse-suffixes
+           'agent-shell-queue-transient
+           (mapcar (lambda (line) (list :info line))
+                   (agent-shell-queue-transient--preview)))))
 
 ;;;###autoload
 (transient-define-prefix agent-shell-queue-transient ()
@@ -236,9 +244,12 @@ When idle, move to the end of the shell input in its existing window,
 leave an open viewport composer and its cursor unchanged, or switch a
 response viewport to editing mode.  Preserve drafts and submit nothing.
 Otherwise show the queue menu."
+  ;; Rebuild the heading's per-entry lines after every in-menu command.
+  :refresh-suffixes t
   [:description agent-shell-queue-transient--description
-   (:info #'agent-shell-queue-transient--status)
-   (:info #'agent-shell-queue-transient--preview)]
+   :class transient-column
+   :setup-children agent-shell-queue-transient--heading-children
+   (:info #'agent-shell-queue-transient--status)]
   [["Add"
     ("f" "Add to front…" agent-shell-queue-transient-add-front :transient t)
     ("b" "Add to back…" agent-shell-queue-transient-add-back :transient t)]
