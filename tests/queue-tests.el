@@ -369,3 +369,155 @@ SENT (prompts submitted so far, newest first)."
         (agent-shell-queue-transient))
       (should (= (point) 3))
       (should (equal (buffer-string) "draft")))))
+
+(ert-deftest asqt-view-shows-full-prompt ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "first line\nsecond line"))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "1: first line second line")))
+      (save-window-excursion
+        (agent-shell-queue-transient-view)
+        (should (string-match-p "\\`first line\nsecond line\n?\\'"
+                                (with-current-buffer "*Agent queue prompt*"
+                                  (buffer-string))))))
+    (should (equal (agent-shell-queue-transient--pending) '("first line\nsecond line")))
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-hold-release-keeps-paused-queue-paused ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    ;; Idle and paused: the submission is queued and its advance deferred.
+    (agent-shell-prompt-queue "later")
+    (should agent-shell-queue-transient--deferred)
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "1: later"))
+              ((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) "edited")))
+      (agent-shell-queue-transient-edit))
+    (should-not sent)
+    (should agent-shell-queue-transient--paused)
+    (should (equal (agent-shell-queue-transient--pending) '("edited")))
+    (agent-shell-queue-transient-resume)
+    (should (equal sent '("edited")))))
+
+(ert-deftest asqt-hold-release-waits-for-idle ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "later")
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "1: later"))
+              ((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _)
+                 ;; Deferred by the hold while the shell is still busy.
+                 (agent-shell--prompt-queue-process-next)
+                 "edited")))
+      (agent-shell-queue-transient-edit))
+    (should-not sent)
+    (setq busy nil)
+    (agent-shell--prompt-queue-process-next)
+    (should (equal sent '("edited")))))
+
+(ert-deftest asqt-nested-holds-release-once ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "later")
+    (agent-shell-queue-transient--held
+     (lambda ()
+       (agent-shell-queue-transient--held
+        (lambda ()
+          (should (= agent-shell-queue-transient--holds 2))
+          (setq busy nil)
+          (agent-shell--prompt-queue-process-next)))
+       ;; The inner release must not advance while the outer hold is open.
+       (should (= agent-shell-queue-transient--holds 1))
+       (should-not sent)))
+    (should (zerop agent-shell-queue-transient--holds))
+    (should (equal sent '("later")))))
+
+(ert-deftest asqt-killing-shell-during-hold-is-safe ()
+  (asqt-test-shell
+    (agent-shell-queue-transient--held (lambda () (kill-buffer shell)))
+    (should-not (buffer-live-p shell))))
+
+(ert-deftest asqt-blank-add-is-ignored ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "existing"))
+    (cl-letf (((symbol-function 'agent-shell--prompt-queue-read) (lambda (&rest _) " \n ")))
+      (agent-shell-queue-transient-add-front)
+      (agent-shell-queue-transient-add-back))
+    (should (equal (agent-shell-queue-transient--pending) '("existing")))
+    (should-not sent)
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-edit-refuses-replaced-queue ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts (list "first" "second"))
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "2: second"))
+              ((symbol-function 'agent-shell--prompt-queue-read)
+               (lambda (&rest _)
+                 ;; Something else rewrote the queue while the user was typing.
+                 (map-put! agent-shell--state :pending-prompts (list "first" "other"))
+                 "edited")))
+      (should-error (agent-shell-queue-transient-edit) :type 'user-error))
+    (should (equal (agent-shell-queue-transient--pending) '("first" "other")))
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-select-on-empty-queue-errors ()
+  (asqt-test-shell
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (ert-fail "Unexpected prompt"))))
+      (dolist (command '(agent-shell-queue-transient-edit
+                         agent-shell-queue-transient-view
+                         agent-shell-queue-transient-move-first
+                         agent-shell-queue-transient-remove))
+        (should-error (funcall command) :type 'user-error)))
+    (should (zerop agent-shell-queue-transient--holds))))
+
+(ert-deftest asqt-entry-requires-mode ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-mode -1)
+    (cl-letf (((symbol-function 'transient-setup)
+               (lambda (&rest _) (ert-fail "Unexpected menu"))))
+      (should-error (agent-shell-queue-transient) :type 'user-error))))
+
+(ert-deftest asqt-status-reflects-busy-and-paused ()
+  (asqt-test-shell
+    (should (equal (substring-no-properties (agent-shell-queue-transient--status))
+                   "idle · automatic · 0 waiting"))
+    (setq busy t)
+    (agent-shell-queue-transient-pause)
+    (map-put! agent-shell--state :pending-prompts (list "a" "b"))
+    (let ((status (agent-shell-queue-transient--status)))
+      (should (equal (substring-no-properties status) "working · paused · 2 waiting"))
+      (should (eq (get-text-property 0 'face status) 'shadow)))))
+
+(ert-deftest asqt-label-folds-newlines-and-truncates ()
+  (should (equal (agent-shell-queue-transient--label "one\r\ntwo\nthree" 0 90)
+                 "1: one two three"))
+  (let ((label (agent-shell-queue-transient--label (make-string 100 ?x) 2 20)))
+    (should (string-prefix-p "3: xxx" label))
+    (should (string-suffix-p "…" label))
+    (should (= (string-width label) (+ (length "3: ") 20)))))
+
+(ert-deftest asqt-preview-shows-first-three-entries ()
+  (asqt-test-shell
+    (map-put! agent-shell--state :pending-prompts
+              (list "one\ntwo" (make-string 100 ?x) "three" "four"))
+    (let ((lines (split-string (agent-shell-queue-transient--preview) "\n")))
+      (should (equal (length lines) 3))
+      (should (equal (nth 0 lines) "  1: one two"))
+      (should (string-prefix-p "  2: xxx" (nth 1 lines)))
+      (should (string-suffix-p "…" (nth 1 lines)))
+      (should (equal (nth 2 lines) "  3: three")))))
+
+(ert-deftest asqt-mode-line-is-silent-unless-paused-in-a-shell ()
+  (asqt-test-shell
+    (should-not (agent-shell-queue-transient--mode-line))
+    (agent-shell-queue-transient-pause)
+    (with-temp-buffer
+      (should-not (agent-shell-queue-transient--mode-line)))
+    (cl-letf (((symbol-function 'agent-shell--shell-buffer) (lambda (&rest _) nil)))
+      (should-not (agent-shell-queue-transient--mode-line)))))
+
+(ert-deftest asqt-mode-toggles-global-mode-string ()
+  (asqt-test-shell
+    (should (member agent-shell-queue-transient--mode-line-construct global-mode-string))
+    (agent-shell-queue-transient-mode -1)
+    (should-not (member agent-shell-queue-transient--mode-line-construct global-mode-string))))
