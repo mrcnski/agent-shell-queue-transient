@@ -1,7 +1,7 @@
 ;;; agent-shell-queue-transient.el --- Manage pending agent prompts -*- lexical-binding: t; -*-
 
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (agent-shell "0.76.1") (transient "0.7"))
+;; Package-Requires: ((emacs "29.1") (agent-shell "0.76.1") (transient "0.8"))
 ;; Keywords: tools, convenience
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 

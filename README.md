@@ -7,9 +7,10 @@ A Transient menu for the prompt queue in agent-shell.
 Features:
 
 - Add to the front or the back of the queue.
-- Edit prompts in the queue.
+- View, edit, or move a queued prompt to the front.
 - Delete prompts, or clear the queue.
-- ... more?
+- Pause the queue after the current turn and resume it later.
+- ... and more!
 
 ## Usage
 
