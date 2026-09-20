@@ -6,6 +6,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
+
 ;; Enable `agent-shell-queue-transient-mode', then invoke
 ;; `agent-shell-queue-transient'.  Queue controls use agent-shell internals.
 
