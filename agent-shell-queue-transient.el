@@ -42,18 +42,21 @@ running one of its commands; otherwise resolve from the current buffer."
     (agent-shell--prompt-queue-migrate))
   (map-elt agent-shell--state :pending-prompts))
 
+(defun agent-shell-queue-transient--blocked-p ()
+  "Return non-nil when the current shell's queue must not advance."
+  (or agent-shell-queue-transient--paused
+      (> agent-shell-queue-transient--holds 0)))
+
 (defun agent-shell-queue-transient--process (original &rest args)
   "Call ORIGINAL with ARGS unless queue processing is held or paused."
-  (if (or agent-shell-queue-transient--paused
-          (> agent-shell-queue-transient--holds 0))
+  (if (agent-shell-queue-transient--blocked-p)
       (setq agent-shell-queue-transient--deferred t)
     (apply original args)))
 
 (defun agent-shell-queue-transient--submit (original prompt)
   "Call ORIGINAL with PROMPT, respecting a paused or held shell queue."
   (with-current-buffer (agent-shell--shell-buffer :no-create t)
-    (if (or agent-shell-queue-transient--paused
-            (> agent-shell-queue-transient--holds 0))
+    (if (agent-shell-queue-transient--blocked-p)
         (progn
           (unless (shell-maker-busy)
             (setq agent-shell-queue-transient--deferred t))
@@ -88,14 +91,19 @@ stopped by an error remains stopped.  Cancellation also releases the hold."
               (setq agent-shell-queue-transient--deferred nil)
               (agent-shell--prompt-queue-process-next))))))))
 
+(defun agent-shell-queue-transient--label (prompt index width)
+  "Return PROMPT as a numbered single line no wider than WIDTH.
+INDEX is the prompt's zero-based position in the queue."
+  (format "%d: %s" (1+ index)
+          (truncate-string-to-width
+           (replace-regexp-in-string "[\n\r]+" " " prompt)
+           width nil nil "…")))
+
 (defun agent-shell-queue-transient--select ()
   "Read the index of a pending prompt in the current shell."
   (let ((choices (seq-map-indexed
                   (lambda (prompt index)
-                    (cons (format "%d: %s" (1+ index)
-                                  (truncate-string-to-width
-                                   (replace-regexp-in-string "[\n\r]+" " " prompt)
-                                   90 nil nil "…"))
+                    (cons (agent-shell-queue-transient--label prompt index 90)
                           index))
                   (agent-shell-queue-transient--pending))))
     (unless choices (user-error "No pending prompts"))
@@ -210,14 +218,11 @@ Do not start an idle queue.  An already running queue continues normally."
 (defun agent-shell-queue-transient--preview ()
   "Return a preview of the first three queued entries."
   (with-current-buffer (agent-shell-queue-transient--buffer)
-    (mapconcat #'identity
-               (seq-map-indexed
-                (lambda (prompt index)
-                  (format "  %d: %s" (1+ index)
-                          (truncate-string-to-width
-                           (replace-regexp-in-string "[\n\r]+" " " prompt)
-                           70 nil nil "…")))
-                (seq-take (agent-shell-queue-transient--pending) 3))
+    (mapconcat (lambda (entry)
+                 (concat "  " (agent-shell-queue-transient--label
+                               (car entry) (cdr entry) 70)))
+               (seq-map-indexed #'cons
+                                (seq-take (agent-shell-queue-transient--pending) 3))
                "\n")))
 
 ;;;###autoload
