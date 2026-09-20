@@ -146,11 +146,13 @@ Do not start an idle queue.  An already running queue continues normally."
    (lambda ()
      (let* ((index (agent-shell-queue-transient--select))
             (old (nth index (agent-shell-queue-transient--pending)))
-            (prompt (agent-shell--prompt-queue-read :initial old)))
+            (prompt (agent-shell--prompt-queue-read :initial old))
+            ;; Re-read: the queue may have been replaced while reading.
+            (current (agent-shell-queue-transient--pending)))
        (when (string-blank-p prompt) (user-error "Prompt cannot be empty"))
-       (unless (eq old (nth index (agent-shell-queue-transient--pending)))
+       (unless (eq old (nth index current))
          (user-error "Queue changed; select the prompt again"))
-       (setcar (nthcdr index (agent-shell-queue-transient--pending)) prompt)))))
+       (setcar (nthcdr index current) prompt)))))
 
 (defun agent-shell-queue-transient-view ()
   "Display the full text of a pending prompt."
