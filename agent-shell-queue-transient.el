@@ -37,7 +37,9 @@ running one of its commands; otherwise resolve from the current buffer."
 
 (defun agent-shell-queue-transient--pending ()
   "Return the current shell's pending queue."
-  (agent-shell--prompt-queue-migrate)
+  ;; Upstream plans to drop the migration shim; keep working once it does.
+  (when (fboundp 'agent-shell--prompt-queue-migrate)
+    (agent-shell--prompt-queue-migrate))
   (map-elt agent-shell--state :pending-prompts))
 
 (defun agent-shell-queue-transient--process (original &rest args)
