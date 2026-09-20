@@ -279,23 +279,32 @@ Otherwise show the queue menu."
       (when (buffer-local-value 'agent-shell-queue-transient--paused buffer)
         " Queue paused"))))
 
+(defconst agent-shell-queue-transient--mode-line-construct
+  '(:eval (agent-shell-queue-transient--mode-line))
+  "Entry kept in `global-mode-string' while the mode is enabled.")
+
+(defconst agent-shell-queue-transient--advice
+  '((agent-shell--prompt-queue-process-next . agent-shell-queue-transient--process)
+    (agent-shell-prompt-queue . agent-shell-queue-transient--submit)
+    (agent-shell-prompt-queue-resume . agent-shell-queue-transient--resume))
+  "Alist of (FUNCTION . AROUND-ADVICE) installed while the mode is enabled.")
+
 ;;;###autoload
 (define-minor-mode agent-shell-queue-transient-mode
   "Enable per-shell queue pause and safe queue editing globally.
 Disabling clears pause state without submitting any pending prompts."
   :global t
   :group 'agent-shell
-  (dolist (entry '((agent-shell--prompt-queue-process-next . agent-shell-queue-transient--process)
-                   (agent-shell-prompt-queue . agent-shell-queue-transient--submit)
-                   (agent-shell-prompt-queue-resume . agent-shell-queue-transient--resume)))
+  (pcase-dolist (`(,function . ,advice) agent-shell-queue-transient--advice)
     (if agent-shell-queue-transient-mode
-        (advice-add (car entry) :around (cdr entry))
-      (advice-remove (car entry) (cdr entry))))
+        (advice-add function :around advice)
+      (advice-remove function advice)))
   (if agent-shell-queue-transient-mode
       (add-to-list 'global-mode-string
-                   '(:eval (agent-shell-queue-transient--mode-line)) t)
+                   agent-shell-queue-transient--mode-line-construct t)
     (setq global-mode-string
-          (delete '(:eval (agent-shell-queue-transient--mode-line)) global-mode-string))
+          (delete agent-shell-queue-transient--mode-line-construct
+                  global-mode-string))
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
         (setq agent-shell-queue-transient--paused nil
