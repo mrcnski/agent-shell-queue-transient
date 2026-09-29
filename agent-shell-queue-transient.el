@@ -177,6 +177,18 @@ Do not start an idle queue.  An already running queue continues normally."
                        (append (seq-take pending index)
                                (seq-drop pending (1+ index)))))))))
 
+(defun agent-shell-queue-transient-merge ()
+  "Merge all pending prompts into one, separated by blank lines."
+  (interactive)
+  (agent-shell-queue-transient--held
+   (lambda ()
+     (let ((pending (agent-shell-queue-transient--pending)))
+       (when (length< pending 2)
+         (user-error "Need at least two pending prompts to merge"))
+       ;; `mapconcat' keeps text properties, which carry pasted images.
+       (map-put! agent-shell--state :pending-prompts
+                 (list (mapconcat #'identity pending "\n\n")))))))
+
 (defun agent-shell-queue-transient-remove ()
   "Select and remove one pending prompt."
   (interactive)
@@ -257,6 +269,7 @@ Otherwise show the queue menu."
     ("v" "View full prompt…" agent-shell-queue-transient-view)
     ("e" "Edit…" agent-shell-queue-transient-edit :transient t)
     ("m" "Move to front…" agent-shell-queue-transient-move-first :transient t)
+    ("M" "Merge all into one" agent-shell-queue-transient-merge :transient t)
     ("d" "Remove…" agent-shell-queue-transient-remove :transient t)
     ("D" "Clear queue…" agent-shell-queue-transient-clear :transient t)]
    ["Processing"

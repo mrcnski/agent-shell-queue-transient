@@ -119,6 +119,32 @@ SENT (prompts submitted so far, newest first)."
     (should (equal (agent-shell-queue-transient--pending) '("urgent" "second" "first")))
     (should-not sent)))
 
+(ert-deftest asqt-merge-joins-queue-into-one-prompt ()
+  (asqt-test-shell
+    (setq busy t)
+    (agent-shell-prompt-queue "first")
+    (should-error (agent-shell-queue-transient-merge) :type 'user-error)
+    (agent-shell-prompt-queue (propertize "second" 'display "image"))
+    (agent-shell-prompt-queue "third")
+    (agent-shell-queue-transient-merge)
+    (let ((pending (agent-shell-queue-transient--pending)))
+      (should (equal pending '("first\n\nsecond\n\nthird")))
+      (should (equal (get-text-property 7 'display (car pending)) "image")))
+    (should-not sent)
+    (setq busy nil)
+    (agent-shell--prompt-queue-process-next)
+    (should (equal sent '("first\n\nsecond\n\nthird")))
+    (should-not (agent-shell-queue-transient--pending))))
+
+(ert-deftest asqt-merge-while-idle-does-not-start-queue ()
+  (asqt-test-shell
+    (agent-shell-queue-transient-pause)
+    (agent-shell-prompt-queue "first")
+    (agent-shell-prompt-queue "second")
+    (agent-shell-queue-transient-merge)
+    (should-not sent)
+    (should (equal (agent-shell-queue-transient--pending) '("first\n\nsecond")))))
+
 (ert-deftest asqt-remove-duplicate-by-position-and-clear ()
   (asqt-test-shell
     (setq busy t)

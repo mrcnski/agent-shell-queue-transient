@@ -8,6 +8,7 @@ A Transient menu for the prompt queue in agent-shell.
 
 - **Add** to the front or the back of the queue.
 - **View, edit, or move** a queued prompt to the front.
+- **Merge** all queued prompts into one, to send them as a single message.
 - **Delete** prompts, or **clear** the queue.
 - **Pause** the queue after the current turn and **resume** it later.
 - ... and more!
