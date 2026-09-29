@@ -251,8 +251,9 @@ each entry gets an info item of its own to keep them aligned."
 ;;;###autoload
 (transient-define-prefix agent-shell-queue-transient ()
   "Manage prompts for the current shell or viewport.
-With an empty, unpaused queue, read a new prompt directly when busy.
-When idle, move to the end of the shell input in its existing window,
+With an empty, unpaused queue, read a new prompt directly when busy
+and agent-shell has no persistent prompt to type into.  Otherwise,
+move to the end of the shell input in its existing window,
 leave an open viewport composer and its cursor unchanged, or switch a
 response viewport to editing mode.  Preserve drafts and submit nothing.
 Otherwise show the queue menu."
@@ -284,7 +285,10 @@ Otherwise show the queue menu."
         (or agent-shell-queue-transient--paused
             (agent-shell-queue-transient--pending)))
       (transient-setup 'agent-shell-queue-transient nil nil :scope shell))
-     ((with-current-buffer shell (shell-maker-busy))
+     ;; Without agent-shell's persistent prompt there is nowhere to type
+     ;; mid-turn, so read the prompt here instead.
+     ((and (with-current-buffer shell (shell-maker-busy))
+           (not (bound-and-true-p agent-shell-persistent-prompt-enabled)))
       (agent-shell-queue-transient-add))
      ((derived-mode-p 'agent-shell-viewport-edit-mode)
       nil)

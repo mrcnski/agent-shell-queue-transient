@@ -3,6 +3,11 @@
 (require 'cl-lib)
 (require 'agent-shell-queue-transient)
 
+;; Tests default to agent-shell without a persistent prompt, as in versions
+;; before 0.77.4; the ones about it bind this to t.
+(defvar agent-shell-persistent-prompt-enabled)
+(setq agent-shell-persistent-prompt-enabled nil)
+
 (defmacro asqt-test-shell (&rest body)
   "Run BODY with an isolated shell and real queue functions.
 BODY sees SHELL (the shell buffer), BUSY (settable busy state) and
@@ -262,6 +267,24 @@ SENT (prompts submitted so far, newest first)."
       (agent-shell-queue-transient-clear))
     (should-not sent)
     (should-not (agent-shell-queue-transient--pending))))
+
+(ert-deftest asqt-empty-busy-focuses-persistent-prompt ()
+  (let ((agent-shell-persistent-prompt-enabled t))
+    (asqt-test-shell
+      (setq busy t)
+      (insert "existing draft")
+      (goto-char (point-min))
+      (save-window-excursion
+        (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+                   (lambda (&rest _) (ert-fail "Unexpected minibuffer read")))
+                  ((symbol-function 'transient-setup)
+                   (lambda (&rest _) (ert-fail "Unexpected menu"))))
+          (agent-shell-queue-transient))
+        (should (eq (window-buffer) shell))
+        (should (= (point) (point-max)))
+        (should (equal (buffer-string) "existing draft")))
+      (should-not (agent-shell-queue-transient--pending))
+      (should-not sent))))
 
 (ert-deftest asqt-empty-busy-reads-without-menu ()
   (asqt-test-shell

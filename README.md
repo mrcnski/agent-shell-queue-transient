@@ -19,8 +19,7 @@ Invoke `agent-shell-queue-transient` in an agent-shell buffer.
 
 The entry command adapts to the queue:
 
-- Busy with an empty queue: read a new prompt directly.
-- Idle with an empty queue: move to the end of the shell input.
+- Empty queue: move to the end of the shell input.
 - Pending prompts or an explicitly paused queue: show the menu.
 
 ## Installation
