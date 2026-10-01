@@ -8,6 +8,14 @@
 (defvar agent-shell-persistent-prompt-enabled)
 (setq agent-shell-persistent-prompt-enabled nil)
 
+;; Likewise one prompt per turn, as before agent-shell merged the queue.
+(defvar agent-shell-prompt-queue-merge)
+(setq agent-shell-prompt-queue-merge nil)
+
+(defun asqt-test-upstream-merge-option-p ()
+  "Non-nil when agent-shell defines `agent-shell-prompt-queue-merge'."
+  (get 'agent-shell-prompt-queue-merge 'standard-value))
+
 (defmacro asqt-test-shell (&rest body)
   "Run BODY with an isolated shell and real queue functions.
 BODY sees SHELL (the shell buffer), BUSY (settable busy state) and
@@ -218,6 +226,40 @@ SENT (prompts submitted so far, newest first)."
               (should (string-match-p "b Add to back" (buffer-string)))
               (should-not (string-match-p "Send prompt" (buffer-string)))))
         (transient--emergency-exit)))))
+
+(ert-deftest asqt-merge-shown-only-without-upstream-merging ()
+  (dolist (merge '(nil t))
+    (let ((agent-shell-prompt-queue-merge merge))
+      (asqt-test-shell
+        (map-put! agent-shell--state :pending-prompts (list "a" "b"))
+        (save-window-excursion
+          (switch-to-buffer (current-buffer))
+          (unwind-protect
+              (progn
+                (agent-shell-queue-transient)
+                (with-current-buffer (get-buffer transient--buffer-name)
+                  (should (eq (not merge)
+                              (and (string-match-p "M Merge all into one"
+                                                   (buffer-string))
+                                   t)))))
+            (transient--emergency-exit)))))))
+
+(ert-deftest asqt-upstream-merging-respects-pause-and-order ()
+  (skip-unless (asqt-test-upstream-merge-option-p))
+  (let ((agent-shell-prompt-queue-merge t))
+    (asqt-test-shell
+      (setq busy t)
+      (agent-shell-queue-transient-pause)
+      (dolist (prompt '("first" "second")) (agent-shell-prompt-queue prompt))
+      (cl-letf (((symbol-function 'agent-shell--prompt-queue-read)
+                 (lambda (&rest _) "urgent")))
+        (agent-shell-queue-transient-add-front))
+      (setq busy nil)
+      (agent-shell--prompt-queue-process-next)
+      (should-not sent)
+      (agent-shell-queue-transient-resume)
+      (should (equal sent '("urgent\n\nfirst\n\nsecond")))
+      (should-not (agent-shell-queue-transient--pending)))))
 
 (ert-deftest asqt-add-front-idle-and-paused ()
   (asqt-test-shell

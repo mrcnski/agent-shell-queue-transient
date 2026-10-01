@@ -177,6 +177,10 @@ Do not start an idle queue.  An already running queue continues normally."
                        (append (seq-take pending index)
                                (seq-drop pending (1+ index)))))))))
 
+(defun agent-shell-queue-transient--merge-manually-p ()
+  "Non-nil unless agent-shell already merges the queue when sending it."
+  (not (bound-and-true-p agent-shell-prompt-queue-merge)))
+
 (defun agent-shell-queue-transient-merge ()
   "Merge all pending prompts into one, separated by blank lines."
   (interactive)
@@ -270,7 +274,8 @@ Otherwise show the queue menu."
     ("v" "View full prompt…" agent-shell-queue-transient-view)
     ("e" "Edit…" agent-shell-queue-transient-edit :transient t)
     ("m" "Move to front…" agent-shell-queue-transient-move-first :transient t)
-    ("M" "Merge all into one" agent-shell-queue-transient-merge :transient t)
+    ("M" "Merge all into one" agent-shell-queue-transient-merge :transient t
+     :if agent-shell-queue-transient--merge-manually-p)
     ("d" "Remove…" agent-shell-queue-transient-remove :transient t)
     ("D" "Clear queue…" agent-shell-queue-transient-clear :transient t)]
    ["Processing"
